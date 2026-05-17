@@ -22,6 +22,7 @@ LISBON_TZ = ZoneInfo("Europe/Lisbon")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INTERVALS_BASE_URL = "https://intervals.icu/api/v1"
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+HTTP_USER_AGENT = "sport-notes-intervals-sync/1.0"
 RUSSIAN_MONTHS = {
     1: "января",
     2: "февраля",
@@ -47,20 +48,40 @@ RUSSIAN_WEEKDAYS = {
 }
 
 
+def log(message: str) -> None:
+    print(f"[intervals-sync] {message}", file=sys.stderr)
+
+
 def main() -> int:
     args = parse_args()
     now = datetime.now(LISBON_TZ)
     target_date = parse_target_date(args.date) if args.date else now.date()
     force_run = args.force or env_bool("FORCE_RUN")
 
+    log(
+        "start "
+        f"now_lisbon={now.isoformat()} "
+        f"target_date={target_date.isoformat()} "
+        f"force_run={force_run} "
+        f"dry_run={args.dry_run}"
+    )
+
     if not force_run and now.hour != 9:
-        print(f"Skipping: Lisbon local time is {now:%H:%M}, not 09:00.")
+        log(f"Skipping: Lisbon local time is {now:%H:%M}, not 09:00.")
         return 0
 
     intervals_api_key = os.getenv("INTERVALS_ICU_API_KEY", "")
     openai_api_key = os.getenv("OPENAI_API_KEY", "")
     athlete_id = os.getenv("INTERVALS_ATHLETE_ID", "0")
     openai_model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+
+    log(
+        "config "
+        f"athlete_id={athlete_id} "
+        f"openai_model={openai_model} "
+        f"has_intervals_key={bool(intervals_api_key)} "
+        f"has_openai_key={bool(openai_api_key)}"
+    )
 
     if args.dry_run:
         intervals_context = build_dry_run_context(target_date)
@@ -71,6 +92,8 @@ def main() -> int:
         intervals_client = IntervalsClient(intervals_api_key, athlete_id)
         intervals_context = fetch_intervals_context(intervals_client, target_date)
 
+    log_json("compact_intervals_context", compact_intervals_context(intervals_context))
+
     if args.dry_run:
         ai_summary = build_fallback_summary(intervals_context)
     elif openai_api_key:
@@ -79,21 +102,22 @@ def main() -> int:
         print("Missing OPENAI_API_KEY. Writing fallback summary.")
         ai_summary = build_fallback_summary(intervals_context)
 
-    week_path = get_week_path(target_date)
-    existing_content = week_path.read_text(encoding="utf-8") if week_path.exists() else ""
-    updated_content = upsert_day_block(existing_content, target_date, ai_summary)
+    updates = build_week_updates(target_date, ai_summary)
 
-    if updated_content == existing_content:
-        print(f"No changes for {week_path}.")
+    if not updates:
+        print("No weekly file changes.")
         return 0
 
     if args.dry_run:
-        print(updated_content)
+        for path, content in updates.items():
+            print(f"--- {path.relative_to(REPO_ROOT)} ---")
+            print(content)
         return 0
 
-    week_path.parent.mkdir(parents=True, exist_ok=True)
-    week_path.write_text(updated_content, encoding="utf-8")
-    print(f"Updated {week_path.relative_to(REPO_ROOT)}.")
+    for path, content in updates.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        print(f"Updated {path.relative_to(REPO_ROOT)}.")
     return 0
 
 
@@ -113,6 +137,40 @@ def env_bool(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def summarize_http_error(status_code: int, body: str) -> str:
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return f"Intervals.icu request failed: {status_code} {body[:500]}"
+
+    title = payload.get("title")
+    detail = payload.get("detail")
+    error_name = payload.get("error_name")
+    error_code = payload.get("error_code")
+    parts = [f"Intervals.icu request failed: {status_code}"]
+
+    if title:
+        parts.append(str(title))
+    if error_name:
+        parts.append(f"error_name={error_name}")
+    if error_code:
+        parts.append(f"error_code={error_code}")
+    if detail:
+        parts.append(str(detail))
+
+    return " | ".join(parts)
+
+
+def log_json(label: str, value: Any) -> None:
+    formatted = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+    log(f"{label}={formatted}")
+
+
+def log_keys(label: str, value: dict[str, Any]) -> None:
+    keys = sorted(value.keys())
+    log(f"{label}={json.dumps(keys, ensure_ascii=False)}")
+
+
 class IntervalsClient:
     def __init__(self, api_key: str, athlete_id: str) -> None:
         self.athlete_id = athlete_id
@@ -120,19 +178,27 @@ class IntervalsClient:
         self.headers = {
             "Accept": "application/json",
             "Authorization": f"Basic {token}",
+            "User-Agent": HTTP_USER_AGENT,
         }
 
     def get_json(self, path: str, params: dict[str, str]) -> Any:
         query = urllib.parse.urlencode(params)
         url = f"{INTERVALS_BASE_URL}{path}?{query}"
+        log(f"intervals_request method=GET path={path} params={json.dumps(params, sort_keys=True)}")
         request = urllib.request.Request(url, headers=self.headers)
 
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 payload = response.read().decode("utf-8")
+                log(
+                    "intervals_response "
+                    f"path={path} status={response.status} bytes={len(payload.encode('utf-8'))}"
+                )
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Intervals.icu request failed: {error.code} {body}") from error
+            message = summarize_http_error(error.code, body)
+            log(f"intervals_response path={path} status={error.code} error={message}")
+            raise RuntimeError(message) from error
 
         return json.loads(payload) if payload else None
 
@@ -148,15 +214,41 @@ class IntervalsClient:
             {"oldest": day.isoformat(), "newest": day.isoformat()},
         )
 
+    def get_activity_detail(self, activity_id: str) -> Any:
+        return self.get_json(f"/activity/{activity_id}", {"intervals": "true"})
+
 
 def fetch_intervals_context(client: IntervalsClient, target_date: date) -> dict[str, Any]:
     activity_date = target_date - timedelta(days=1)
+    log(f"fetch_context wellness_date={target_date.isoformat()} activity_date={activity_date.isoformat()}")
+    activities = safe_fetch(lambda: client.get_activities(activity_date), "activities")
     return {
         "target_date": target_date.isoformat(),
         "activity_date": activity_date.isoformat(),
         "wellness": safe_fetch(lambda: client.get_wellness(target_date), "wellness"),
-        "activities": safe_fetch(lambda: client.get_activities(activity_date), "activities"),
+        "activities": activities,
+        "activity_details": fetch_activity_details(client, activities),
     }
+
+
+def fetch_activity_details(client: IntervalsClient, activities_result: dict[str, Any]) -> dict[str, Any]:
+    if not activities_result["ok"]:
+        return {"ok": False, "data": None, "error": activities_result["error"]}
+
+    activities = activities_result["data"]
+    if not isinstance(activities, list) or not activities:
+        return {"ok": True, "data": [], "error": None}
+
+    details = []
+    for activity in activities:
+        if not isinstance(activity, dict) or not activity.get("id"):
+            continue
+
+        activity_id = str(activity["id"])
+        detail = safe_fetch(lambda activity_id=activity_id: client.get_activity_detail(activity_id), f"activity_detail:{activity_id}")
+        details.append({"id": activity_id, **detail})
+
+    return {"ok": True, "data": details, "error": None}
 
 
 def safe_fetch(fetcher: Any, label: str) -> dict[str, Any]:
@@ -191,11 +283,45 @@ def build_dry_run_context(target_date: date) -> dict[str, Any]:
             ],
             "error": None,
         },
+        "activity_details": {
+            "ok": True,
+            "data": [
+                {
+                    "id": "dry-run",
+                    "ok": True,
+                    "data": {
+                        "id": "dry-run",
+                        "icu_hr_zone_times": [0, 2100, 600, 0, 0],
+                        "decoupling": 2.4,
+                        "icu_intervals": [
+                            {
+                                "type": "WORK",
+                                "moving_time": 2700,
+                                "distance": 8500,
+                                "average_heartrate": 142,
+                                "training_load": 45,
+                                "zone": 2,
+                            }
+                        ],
+                    },
+                    "error": None,
+                }
+            ],
+            "error": None,
+        },
     }
 
 
 def build_ai_summary(api_key: str, model: str, intervals_context: dict[str, Any]) -> dict[str, str]:
     compact_context = compact_intervals_context(intervals_context)
+    target_label = format_day_heading(parse_target_date(compact_context["target_date"]))
+    activity_label = format_day_heading(parse_target_date(compact_context["activity_date"]))
+    log(
+        "openai_request "
+        f"method=POST url={OPENAI_CHAT_URL} model={model} "
+        "temperature=0.2 response_format=json_object"
+    )
+    log_json("openai_prompt_context", compact_context)
     body = {
         "model": model,
         "temperature": 0.2,
@@ -204,8 +330,17 @@ def build_ai_summary(api_key: str, model: str, intervals_context: dict[str, Any]
             {
                 "role": "system",
                 "content": (
-                    "Ты endurance performance and health coach. Пиши кратко, по-русски, "
-                    "без мотивационного шума. Не выдумывай отсутствующие данные. "
+                    "Ты endurance performance and health coach. Приоритеты: здоровье, восстановление, "
+                    "профилактика травм, стабильная аэробная база, затем производительность. "
+                    "Пиши кратко, по-русски, без мотивационного шума. "
+                    "Давай консервативное решение при плохом сне, высокой усталости, боли или неполных данных. "
+                    "Анализируй нагрузку через ATL/CTL/form, training load, длительность, HR, зоны, "
+                    "decoupling/дрейф, рельеф и накопленную усталость. "
+                    "Если ATL заметно выше CTL, form отрицательный, сон плохой/неизвестен или HRV низкий, "
+                    "не рекомендуй интенсивность. После long ride, high load activity или высокой доли Z3+ "
+                    "на следующий день предпочитай Z1/Z2, mobility или отдых. "
+                    "Вывод должен помогать решить: keep / reduce duration / reduce intensity / Z1-Z2 only / mobility / full rest. "
+                    "Не выдумывай отсутствующие данные. "
                     "Верни только JSON с ключами state и result."
                 ),
             },
@@ -213,8 +348,17 @@ def build_ai_summary(api_key: str, model: str, intervals_context: dict[str, Any]
                 "role": "user",
                 "content": (
                     "Сформируй запись для недельного markdown-файла.\n"
-                    "State: сон и восстановление за текущий день.\n"
-                    "Result: активности за прошлый день и короткий вывод для планирования нагрузки.\n"
+                    f"State: сон и восстановление за {target_label}. Обязательно явно укажи "
+                    "\"Длительность сна\" и \"средний пульс\"; если данных нет, напиши \"нет данных\".\n"
+                    f"Result: активности за {activity_label} и короткий вывод, что учесть на {target_label}.\n"
+                    "В Result не добавляй префикс вида \"Активность YYYY-MM-DD\", потому что запись "
+                    "будет помещена в блок нужного дня.\n"
+                    "Не используй технические имена переменных target_date и activity_date в ответе.\n"
+                    "Для активности указывай длительность, дистанцию, набор, средний пульс, max HR "
+                    "и нагрузку, если эти поля есть.\n"
+                    "Если есть зоны, интервалы или decoupling, используй их для вывода, но не перечисляй сырые массивы.\n"
+                    "Result должен заканчиваться коротким решением для следующего дня: что ограничить или разрешить.\n"
+                    "State и Result будут записаны в разные дневные блоки.\n"
                     "Нужны только минимально полезные данные и аналитический вывод.\n\n"
                     f"Данные:\n{json.dumps(compact_context, ensure_ascii=False, indent=2)}"
                 ),
@@ -232,16 +376,18 @@ def build_ai_summary(api_key: str, model: str, intervals_context: dict[str, Any]
 
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            response_body = response.read().decode("utf-8")
+            log(f"openai_response status={response.status} bytes={len(response_body.encode('utf-8'))}")
+            payload = json.loads(response_body)
         content = payload["choices"][0]["message"]["content"]
         parsed = json.loads(content)
-        return normalize_ai_summary(parsed)
+        return normalize_ai_summary(parsed, compact_context["target_date"], compact_context["activity_date"])
     except Exception as error:  # noqa: BLE001 - fallback keeps the daily sync useful.
         print(f"OpenAI request failed. Writing fallback summary. Error: {error}", file=sys.stderr)
         return build_fallback_summary(intervals_context)
 
 
-def normalize_ai_summary(value: Any) -> dict[str, str]:
+def normalize_ai_summary(value: Any, target_date: str, activity_date: str) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ValueError("OpenAI response is not a JSON object.")
 
@@ -250,7 +396,16 @@ def normalize_ai_summary(value: Any) -> dict[str, str]:
     if not isinstance(state, str) or not isinstance(result, str):
         raise ValueError("OpenAI response must contain string keys: state, result.")
 
-    return {"state": state.strip(), "result": result.strip()}
+    return {
+        "state": replace_date_placeholders(state.strip(), target_date, activity_date),
+        "result": replace_date_placeholders(result.strip(), target_date, activity_date),
+    }
+
+
+def replace_date_placeholders(text: str, target_date: str, activity_date: str) -> str:
+    target_label = format_day_heading(parse_target_date(target_date))
+    activity_label = format_day_heading(parse_target_date(activity_date))
+    return text.replace("target_date", target_label).replace("activity_date", activity_label)
 
 
 def compact_intervals_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -259,6 +414,7 @@ def compact_intervals_context(context: dict[str, Any]) -> dict[str, Any]:
         "activity_date": context["activity_date"],
         "wellness": compact_wellness(context["wellness"]),
         "activities": compact_activities(context["activities"]),
+        "activity_details": compact_activity_details(context.get("activity_details")),
     }
 
 
@@ -272,20 +428,55 @@ def compact_wellness(wellness_result: dict[str, Any]) -> Any:
     if not isinstance(data, dict):
         return {"message": "No wellness data returned."}
 
+    log_keys("raw_wellness_keys", data)
     fields = [
         "id",
+        "date",
         "sleep_secs",
+        "sleepSecs",
+        "sleep_time",
+        "sleepTime",
+        "sleep_duration",
+        "sleepDuration",
         "sleep_score",
+        "sleepScore",
+        "sleep_quality",
+        "sleepQuality",
+        "average_hr",
+        "avg_hr",
+        "average_heartrate",
+        "avgSleepingHR",
+        "averageSleepingHR",
+        "lowestSleepingHR",
+        "max_hr",
+        "maxHr",
+        "min_hr",
+        "minHr",
         "resting_hr",
+        "restingHR",
         "hrv",
         "hrv_rmssd",
+        "hrvRmssd",
+        "hrv_sdnn",
+        "hrvSdnn",
         "fatigue",
+        "soreness",
         "stress",
+        "mood",
+        "motivation",
         "readiness",
+        "recovery",
         "weight",
+        "bodyFat",
+        "steps",
+        "calories",
         "ctl",
         "atl",
         "form",
+        "rampRate",
+        "ctlLoad",
+        "atlLoad",
+        "sportInfo",
     ]
     return {field: data.get(field) for field in fields if data.get(field) is not None}
 
@@ -298,10 +489,151 @@ def compact_activities(activities_result: dict[str, Any]) -> Any:
     if not isinstance(data, list) or not data:
         return []
 
+    for index, item in enumerate(data):
+        if isinstance(item, dict):
+            log_keys(f"raw_activity_keys[{index}]", item)
+
     fields = [
         "id",
         "name",
         "type",
+        "sport",
+        "sub_type",
+        "subType",
+        "start_date_local",
+        "startDateLocal",
+        "start_date",
+        "startDate",
+        "end_date_local",
+        "endDateLocal",
+        "moving_time",
+        "movingTime",
+        "elapsed_time",
+        "elapsedTime",
+        "distance",
+        "total_elevation_gain",
+        "totalElevationGain",
+        "elevation_gain",
+        "elevationGain",
+        "average_heartrate",
+        "averageHeartrate",
+        "max_heartrate",
+        "maxHeartrate",
+        "min_heartrate",
+        "minHeartrate",
+        "average_watts",
+        "averageWatts",
+        "weighted_average_watts",
+        "weightedAverageWatts",
+        "icu_weighted_avg_watts",
+        "icuWeightedAvgWatts",
+        "normalized_power",
+        "normalizedPower",
+        "max_watts",
+        "maxWatts",
+        "average_speed",
+        "averageSpeed",
+        "max_speed",
+        "maxSpeed",
+        "average_cadence",
+        "averageCadence",
+        "max_cadence",
+        "maxCadence",
+        "icu_training_load",
+        "icuTrainingLoad",
+        "training_load",
+        "trainingLoad",
+        "icu_intensity",
+        "icuIntensity",
+        "icu_atl",
+        "icuAtl",
+        "icu_ctl",
+        "icuCtl",
+        "icu_form",
+        "icuForm",
+        "icu_ramp_rate",
+        "icuRampRate",
+        "icu_ftp",
+        "icuFtp",
+        "icu_weighted_avg_pace",
+        "icuWeightedAvgPace",
+        "icu_grade_adjusted_distance",
+        "icuGradeAdjustedDistance",
+        "icu_power_hr",
+        "icuPowerHr",
+        "decoupling",
+        "pa_decoupling",
+        "power_hr",
+        "powerHr",
+        "calories",
+        "kilojoules",
+        "joules",
+        "perceived_exertion",
+        "perceivedExertion",
+        "rpe",
+        "feel",
+        "feeling",
+        "description",
+        "notes",
+        "commute",
+        "trainer",
+        "device_name",
+        "deviceName",
+        "gear",
+        "icu_zone_times",
+        "icuZoneTimes",
+        "zone_times",
+        "zoneTimes",
+        "icu_hr_zone_times",
+        "icuHrZoneTimes",
+        "hr_zone_times",
+        "hrZoneTimes",
+        "pace_zone_times",
+        "paceZoneTimes",
+        "power_zone_times",
+        "powerZoneTimes",
+    ]
+    return [{field: item.get(field) for field in fields if item.get(field) is not None} for item in data]
+
+
+def compact_activity_details(details_result: Any) -> Any:
+    if not isinstance(details_result, dict):
+        return {"message": "No activity detail request was made."}
+    if not details_result["ok"]:
+        return {"error": details_result["error"]}
+
+    details = details_result["data"]
+    if not isinstance(details, list) or not details:
+        return []
+
+    compacted = []
+    for detail_result in details:
+        if not isinstance(detail_result, dict):
+            continue
+
+        activity_id = detail_result.get("id")
+        if not detail_result.get("ok"):
+            compacted.append({"id": activity_id, "error": detail_result.get("error")})
+            continue
+
+        detail = detail_result.get("data")
+        if not isinstance(detail, dict):
+            compacted.append({"id": activity_id, "message": "No detail data returned."})
+            continue
+
+        log_keys(f"raw_activity_detail_keys[{activity_id}]", detail)
+        compacted.append(compact_activity_detail(detail))
+
+    return compacted
+
+
+def compact_activity_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    fields = [
+        "id",
+        "name",
+        "type",
+        "description",
+        "notes",
         "moving_time",
         "elapsed_time",
         "distance",
@@ -310,15 +642,81 @@ def compact_activities(activities_result: dict[str, Any]) -> Any:
         "max_heartrate",
         "average_watts",
         "weighted_average_watts",
+        "icu_weighted_avg_watts",
+        "normalized_power",
         "average_speed",
+        "average_cadence",
+        "max_cadence",
         "icu_training_load",
         "training_load",
         "icu_intensity",
         "icu_atl",
         "icu_ctl",
         "icu_form",
+        "icu_ramp_rate",
+        "decoupling",
+        "pa_decoupling",
+        "icu_power_hr",
+        "power_hr",
+        "calories",
+        "kilojoules",
+        "perceived_exertion",
+        "icu_zone_times",
+        "zone_times",
+        "icu_hr_zone_times",
+        "hr_zone_times",
+        "icu_power_zone_times",
+        "power_zone_times",
+        "icu_pace_zone_times",
+        "pace_zone_times",
     ]
-    return [{field: item.get(field) for field in fields if item.get(field) is not None} for item in data]
+    compacted = {field: detail.get(field) for field in fields if detail.get(field) is not None}
+
+    intervals = detail.get("icu_intervals")
+    if isinstance(intervals, list):
+        compacted["interval_summary"] = summarize_intervals(intervals)
+
+    return compacted
+
+
+def summarize_intervals(intervals: list[Any]) -> dict[str, Any]:
+    valid_intervals = [interval for interval in intervals if isinstance(interval, dict)]
+    work_intervals = [interval for interval in valid_intervals if str(interval.get("type", "")).upper() == "WORK"]
+    load_values = [to_float(interval.get("training_load")) for interval in valid_intervals]
+    load_values = [value for value in load_values if value is not None]
+
+    return {
+        "count": len(valid_intervals),
+        "work_count": len(work_intervals),
+        "total_work_time": sum_numeric(work_intervals, "moving_time"),
+        "total_work_distance": sum_numeric(work_intervals, "distance"),
+        "total_interval_load": round(sum(load_values), 1) if load_values else None,
+        "hardest_intervals": select_hardest_intervals(work_intervals or valid_intervals),
+    }
+
+
+def select_hardest_intervals(intervals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sorted_intervals = sorted(
+        intervals,
+        key=lambda interval: to_float(interval.get("training_load")) or 0,
+        reverse=True,
+    )
+    fields = [
+        "type",
+        "moving_time",
+        "distance",
+        "average_heartrate",
+        "max_heartrate",
+        "average_watts",
+        "weighted_average_watts",
+        "training_load",
+        "zone",
+        "decoupling",
+    ]
+    return [
+        {field: interval.get(field) for field in fields if interval.get(field) is not None}
+        for interval in sorted_intervals[:5]
+    ]
 
 
 def build_fallback_summary(context: dict[str, Any]) -> dict[str, str]:
@@ -330,17 +728,35 @@ def build_fallback_summary(context: dict[str, Any]) -> dict[str, str]:
 
 def format_fallback_state(wellness: Any) -> str:
     if isinstance(wellness, dict) and wellness.get("error"):
-        return f"Данные восстановления не получены: {wellness['error']}"
+        return (
+            "Длительность сна: нет данных. Средний пульс: нет данных. "
+            f"Данные восстановления не получены: {wellness['error']}"
+        )
     if isinstance(wellness, dict) and wellness.get("message"):
-        return "Данные сна и восстановления в Intervals.icu не найдены. Готовность: неизвестно."
+        return (
+            "Длительность сна: нет данных. Средний пульс: нет данных. "
+            "Данные сна и восстановления в Intervals.icu не найдены. Готовность: неизвестно."
+        )
     if not isinstance(wellness, dict):
-        return "Данные сна и восстановления в неожиданном формате. Готовность: неизвестно."
+        return (
+            "Длительность сна: нет данных. Средний пульс: нет данных. "
+            "Данные сна и восстановления в неожиданном формате. Готовность: неизвестно."
+        )
 
     parts = []
     if "sleep_secs" in wellness:
-        parts.append(f"сон {seconds_to_hours(wellness['sleep_secs'])}")
+        parts.append(f"Длительность сна: {seconds_to_hours(wellness['sleep_secs'])}")
+    else:
+        parts.append("Длительность сна: нет данных")
+
+    average_hr = first_present(wellness, ["average_hr", "avg_hr", "average_heartrate"])
+    if average_hr is not None:
+        parts.append(f"средний пульс: {average_hr}")
+    else:
+        parts.append("средний пульс: нет данных")
+
     if "resting_hr" in wellness:
-        parts.append(f"resting HR {wellness['resting_hr']}")
+        parts.append(f"пульс покоя: {wellness['resting_hr']}")
     if "hrv" in wellness:
         parts.append(f"HRV {wellness['hrv']}")
     if "hrv_rmssd" in wellness:
@@ -356,9 +772,9 @@ def format_fallback_state(wellness: Any) -> str:
 
 def format_fallback_result(activities: Any, activity_date: str) -> str:
     if isinstance(activities, dict) and activities.get("error"):
-        return f"Активности за {activity_date} не получены: {activities['error']}"
+        return f"Активности не получены: {activities['error']}"
     if not activities:
-        return f"За {activity_date} активности в Intervals.icu не найдены. Анализ: дополнительной тренировочной нагрузки не зафиксировано."
+        return "Активности в Intervals.icu не найдены. Анализ: дополнительной тренировочной нагрузки не зафиксировано."
     if not isinstance(activities, list):
         return f"Активности за {activity_date} пришли в неожиданном формате. Анализ: не использовать для повышения нагрузки."
 
@@ -375,19 +791,41 @@ def format_fallback_result(activities: Any, activity_date: str) -> str:
 def format_activity(activity: dict[str, Any]) -> str:
     parts = [str(activity.get("name") or activity.get("type") or "Activity")]
     if "moving_time" in activity:
-        parts.append(f"duration {seconds_to_hhmm(activity['moving_time'])}")
+        parts.append(f"длительность {seconds_to_hhmm(activity['moving_time'])}")
     if "distance" in activity:
-        parts.append(f"distance {meters_to_km(activity['distance'])}")
+        parts.append(f"дистанция {meters_to_km(activity['distance'])}")
     if "total_elevation_gain" in activity:
-        parts.append(f"elevation {round_number(activity['total_elevation_gain'])} m")
+        parts.append(f"набор {round_number(activity['total_elevation_gain'])} м")
     if "average_heartrate" in activity:
-        parts.append(f"avg HR {activity['average_heartrate']}")
+        parts.append(f"средний пульс {activity['average_heartrate']}")
+    if "max_heartrate" in activity:
+        parts.append(f"max HR {activity['max_heartrate']}")
     if "average_watts" in activity:
-        parts.append(f"avg power {activity['average_watts']} W")
+        parts.append(f"средняя мощность {activity['average_watts']} W")
     load = activity.get("icu_training_load", activity.get("training_load"))
     if load is not None:
-        parts.append(f"load {round_number(load)}")
+        parts.append(f"нагрузка {round_number(load)}")
     return ", ".join(parts)
+
+
+def first_present(source: dict[str, Any], keys: list[str]) -> Any:
+    for key in keys:
+        if key in source and source[key] is not None:
+            return source[key]
+    return None
+
+
+def to_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def sum_numeric(items: list[dict[str, Any]], key: str) -> float | None:
+    values = [to_float(item.get(key)) for item in items]
+    values = [value for value in values if value is not None]
+    return round(sum(values), 1) if values else None
 
 
 def seconds_to_hours(value: Any) -> str:
@@ -425,13 +863,55 @@ def get_week_path(day: date) -> Path:
     return REPO_ROOT / "training" / str(day.year) / "weeks" / f"w{week_number:02d}.md"
 
 
-def upsert_day_block(content: str, day: date, ai_summary: dict[str, str]) -> str:
+def build_week_updates(target_date: date, ai_summary: dict[str, str]) -> dict[Path, str]:
+    activity_date = target_date - timedelta(days=1)
+    pending: dict[Path, str] = {}
+
+    target_path = get_week_path(target_date)
+    target_content = read_pending_or_file(pending, target_path)
+    pending[target_path] = upsert_day_field(target_content, target_date, state=ai_summary["state"])
+
+    activity_path = get_week_path(activity_date)
+    activity_content = read_pending_or_file(pending, activity_path)
+    pending[activity_path] = upsert_day_field(activity_content, activity_date, result=ai_summary["result"])
+
+    changed = {}
+    for path, updated_content in pending.items():
+        existing_content = path.read_text(encoding="utf-8") if path.exists() else ""
+        if updated_content != existing_content:
+            changed[path] = updated_content
+            log(f"week_update path={path.relative_to(REPO_ROOT)} changed=true")
+        else:
+            log(f"week_update path={path.relative_to(REPO_ROOT)} changed=false")
+
+    return changed
+
+
+def read_pending_or_file(pending: dict[Path, str], path: Path) -> str:
+    if path in pending:
+        return pending[path]
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def upsert_day_field(
+    content: str,
+    day: date,
+    *,
+    state: str | None = None,
+    result: str | None = None,
+) -> str:
     heading = format_day_heading(day)
-    week_header = format_week_header(day)
-    normalized = ensure_week_header(content, week_header)
+    normalized = ensure_week_structure(content, day)
     existing_block = extract_day_block(normalized, heading)
     plan = extract_plan(existing_block) if existing_block else "TBD"
-    new_block = format_day_block(heading, plan, ai_summary["state"], ai_summary["result"])
+    current_state = extract_state(existing_block) if existing_block else "TBD"
+    current_result = extract_result(existing_block) if existing_block else "TBD"
+    new_block = format_day_block(
+        heading,
+        plan,
+        state if state is not None else current_state,
+        result if result is not None else current_result,
+    )
 
     if existing_block:
         return normalized.replace(existing_block, new_block)
@@ -440,11 +920,41 @@ def upsert_day_block(content: str, day: date, ai_summary: dict[str, str]) -> str
     return f"{normalized}{separator}{new_block}\n"
 
 
-def ensure_week_header(content: str, week_header: str) -> str:
+def ensure_week_structure(content: str, week_reference_day: date) -> str:
+    header = extract_week_header(content) or format_week_header(week_reference_day)
+    blocks = []
+
+    for day in week_days(week_reference_day):
+        heading = format_day_heading(day)
+        existing_block = extract_day_block(content, heading)
+        blocks.append(
+            format_day_block(
+                heading,
+                extract_plan(existing_block),
+                extract_state(existing_block),
+                extract_result(existing_block),
+            )
+        )
+
+    return f"{header.strip()}\n\n" + "\n\n".join(blocks) + "\n"
+
+
+def extract_week_header(content: str) -> str | None:
     stripped = content.strip()
-    if stripped:
-        return content if content.endswith("\n") else f"{content}\n"
-    return f"{week_header}\n\n"
+    if not stripped:
+        return None
+
+    match = re.search(r"^## ", stripped, re.MULTILINE)
+    if not match:
+        return stripped
+
+    header = stripped[: match.start()].strip()
+    return header or None
+
+
+def week_days(day: date) -> list[date]:
+    monday = day - timedelta(days=day.weekday())
+    return [monday + timedelta(days=offset) for offset in range(7)]
 
 
 def format_week_header(day: date) -> str:
@@ -468,12 +978,31 @@ def extract_day_block(content: str, heading: str) -> str | None:
     return match.group(0).rstrip("\n") if match else None
 
 
-def extract_plan(block: str) -> str:
-    match = re.search(r"^Plan:\n(.*?)(?=^State:|\Z)", block, re.MULTILINE | re.DOTALL)
+def extract_plan(block: str | None) -> str:
+    return extract_section(block, "Plan")
+
+
+def extract_state(block: str | None) -> str:
+    return extract_section(block, "State")
+
+
+def extract_result(block: str | None) -> str:
+    return extract_section(block, "Result")
+
+
+def extract_section(block: str | None, section_name: str) -> str:
+    if not block:
+        return "TBD"
+
+    match = re.search(
+        rf"^{re.escape(section_name)}:\n(.*?)(?=^(?:Plan|State|Result):|\Z)",
+        block,
+        re.MULTILINE | re.DOTALL,
+    )
     if not match:
         return "TBD"
-    plan = match.group(1).strip()
-    return plan or "TBD"
+    value = match.group(1).strip()
+    return value or "TBD"
 
 
 def format_day_block(heading: str, plan: str, state: str, result: str) -> str:

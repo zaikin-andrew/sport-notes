@@ -54,10 +54,18 @@ Optional GitHub Secrets:
 
 Daily write behavior:
 
-- current-day sleep and recovery data goes into `State`
-- previous-day activities go into `Result`
+- current-day sleep and recovery data goes into `State` for the current-day block
+- previous-day activities go into `Result` for the previous-day block
 - raw API responses are not stored
 - if OpenAI fails, the script writes a conservative fallback summary
+
+Data pulled by the sync:
+
+- `GET /athlete/{id}/wellness`
+- `GET /athlete/{id}/activities`
+- `GET /activity/{activity_id}?intervals=true` for each previous-day activity
+
+The activity detail response is compacted before it is sent to OpenAI. Use zones, intervals, decoupling, HR, power, duration, elevation, load, and subjective fields when available, but do not store raw streams or full API payloads in weekly files.
 
 ## Future MCP Ideas
 

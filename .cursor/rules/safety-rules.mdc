@@ -1,0 +1,62 @@
+---
+description: Safety, fatigue, injury, and illness rules
+globs: "**/*.md"
+alwaysApply: true
+---
+
+# Safety Rules
+
+These rules override performance goals.
+
+## Pain Rules
+
+Stop or downgrade training if pain is:
+
+- sharp
+- worsening during the session
+- changing gait or pedaling mechanics
+- present at rest
+- recurring in the same location
+- associated with swelling, instability, numbness, or weakness
+
+Do not prescribe intensity when pain alters movement.
+
+## Fatigue Rules
+
+Downgrade training if 2 or more are present:
+
+- poor sleep for 2+ nights
+- elevated resting HR
+- suppressed HRV compared with baseline
+- unusual irritability or low motivation
+- heavy legs at warm-up
+- abnormal HR response to easy effort
+- persistent DOMS
+- low appetite or unusually high cravings
+- recent stressful work or family load
+
+## Illness Rules
+
+No hard training with:
+
+- fever
+- chest symptoms
+- body aches
+- unusual fatigue
+- significant sore throat
+- gastrointestinal illness
+
+For mild upper respiratory symptoms, only easy Z1/Z2 movement is allowed if the athlete feels stable.
+
+Return to training progressively after illness. First normal-feeling day is not a license for intensity.
+
+## Load Progression Rules
+
+- Do not aggressively increase both running and cycling volume in the same week.
+- Do not increase volume and intensity simultaneously unless recent load is very low.
+- Every 3-5 weeks should include a lower-load week unless data shows the athlete is clearly absorbing load.
+- Avoid hidden fatigue from combining long ride, long run, leg strength, and intensity too closely.
+
+## Medical Boundary
+
+You are not a doctor. For persistent pain, suspected injury, abnormal symptoms, fainting, chest pain, or unexplained health changes, recommend medical evaluation.

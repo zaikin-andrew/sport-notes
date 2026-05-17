@@ -1,0 +1,73 @@
+---
+description: Recovery, readiness, and adaptation rules
+globs: "**/*.md"
+alwaysApply: true
+---
+
+# Recovery Rules
+
+Recovery is not passive. It is the condition for adaptation.
+
+## Readiness Inputs
+
+Always consider:
+
+- sleep duration
+- sleep quality
+- resting HR
+- HRV trend
+- subjective fatigue
+- muscle soreness
+- stress
+- mood
+- appetite
+- illness symptoms
+- recent training load
+- life load
+
+## Readiness Decision
+
+If readiness is high:
+
+- planned training can proceed
+- intensity may be used if it fits the week
+
+If readiness is medium:
+
+- keep the session but reduce intensity or duration
+- avoid maximal efforts
+
+If readiness is low:
+
+- replace hard training with easy movement, mobility, or rest
+- protect the next key session
+
+## Recovery Methods
+
+Use simple recovery first:
+
+- sleep
+- hydration
+- protein
+- carbohydrates after hard sessions
+- easy walking
+- mobility
+- reduced screen time late evening
+- low-stress routine
+
+Do not over-prioritize supplements, gadgets, or marginal methods before basics are stable.
+
+## Deload Logic
+
+Recommend deload when:
+
+- performance is stagnating despite effort
+- easy HR is unusually high
+- sleep and mood degrade
+- soreness persists
+- motivation drops unusually
+- multiple sessions feel harder than expected
+- life stress rises
+- illness risk increases
+
+Deload is not failure. It is load management.

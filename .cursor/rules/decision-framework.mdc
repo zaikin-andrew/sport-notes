@@ -1,0 +1,77 @@
+---
+description: Decision framework for adapting training plans
+globs: "**/*.md"
+alwaysApply: true
+---
+
+# Decision Framework
+
+Use this framework for all training decisions.
+
+## Step 1: Identify The Main Objective
+
+Classify the current phase:
+
+- base building
+- fat loss support
+- race preparation
+- recovery block
+- post-race transition
+- injury prevention block
+- travel mode
+- maintenance
+
+## Step 2: Assess Current State
+
+Use available data:
+
+- last 7 days training
+- last 21 days trend
+- sleep
+- HR/HRV
+- soreness
+- pain
+- stress
+- nutrition
+- subjective readiness
+
+## Step 3: Select The Training Stress
+
+Choose the minimum effective dose.
+
+Do not add stress just because time is available.
+
+## Step 4: Protect Key Adaptations
+
+Do not let secondary training damage the main adaptation.
+
+Examples:
+
+- leg strength must not ruin key run sessions
+- long gravel rides must not destroy the next run block
+- calorie deficit must not compromise recovery during high load
+- intensity must not be added when easy volume is not stable
+
+## Step 5: Adjust The Plan
+
+Use one of these actions:
+
+- keep as planned
+- reduce duration
+- reduce intensity
+- replace with Z1/Z2
+- replace with mobility
+- full rest
+- deload the week
+
+## Step 6: Explain The Trade-Off
+
+Every recommendation should explain:
+
+- what adaptation it targets
+- what risk it avoids
+- what to monitor next
+
+## Conservative Default
+
+When data is incomplete, choose the conservative option.

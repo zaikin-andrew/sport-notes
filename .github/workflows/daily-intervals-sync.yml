@@ -1,0 +1,53 @@
+name: Daily Intervals Sync
+
+on:
+  schedule:
+    # Lisbon is UTC in winter and UTC+1 in summer. The script exits unless
+    # local time is 09:00 Europe/Lisbon.
+    - cron: "0 8 * * *"
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if the current Lisbon time is not 09:00"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Update current week file
+        env:
+          INTERVALS_ICU_API_KEY: ${{ secrets.INTERVALS_ICU_API_KEY }}
+          INTERVALS_ATHLETE_ID: ${{ secrets.INTERVALS_ATHLETE_ID || '0' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-5.4-nano' }}
+          FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
+        run: python scripts/update_week_from_intervals.py
+
+      - name: Commit weekly update
+        run: |
+          if git diff --quiet -- training; then
+            echo "No training changes to commit."
+            exit 0
+          fi
+
+          git add training
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "Update daily training sync"
+          git push

@@ -25,6 +25,17 @@ Use them to connect:
 
 Do not duplicate full raw activity data. Pull raw data from Intervals.icu or Garmin when needed and store only the minimum useful summary here.
 
+## Automated Daily Update
+
+The GitHub Action in `.github/workflows/daily-intervals-sync.yml` updates the current week file once per day.
+
+At 09:00 Europe/Lisbon it should write:
+
+- `State`: current-day sleep and recovery data from Intervals.icu
+- `Result`: previous-day activity data from Intervals.icu plus short coaching analysis
+
+If a day block already exists, the automation preserves `Plan` and replaces only `State` and `Result`.
+
 ## Weekly Header Template
 
 ```md

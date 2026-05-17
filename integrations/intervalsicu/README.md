@@ -32,6 +32,33 @@ For `State`, summarize sleep, recovery, HRV, resting HR, fatigue, and readiness 
 
 For `Result`, store only the minimum activity data needed for future planning, plus a short coaching analysis.
 
+## Daily GitHub Action
+
+The daily sync workflow runs from `.github/workflows/daily-intervals-sync.yml`.
+
+Schedule:
+
+- target time: 09:00 Europe/Lisbon
+- GitHub cron: 08:00 and 09:00 UTC
+- the script exits unless local Lisbon time is 09:00, except manual runs
+
+Required GitHub Secrets:
+
+- `INTERVALS_ICU_API_KEY`
+- `OPENAI_API_KEY`
+
+Optional GitHub Secrets:
+
+- `INTERVALS_ATHLETE_ID`, defaults to `0`
+- `OPENAI_MODEL`, defaults to `gpt-4.1-mini`
+
+Daily write behavior:
+
+- current-day sleep and recovery data goes into `State`
+- previous-day activities go into `Result`
+- raw API responses are not stored
+- if OpenAI fails, the script writes a conservative fallback summary
+
 ## Future MCP Ideas
 
 Tools could expose:

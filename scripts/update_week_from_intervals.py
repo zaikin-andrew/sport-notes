@@ -12,7 +12,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -55,19 +55,24 @@ def log(message: str) -> None:
 def main() -> int:
     args = parse_args()
     now = datetime.now(LISBON_TZ)
+    scheduled_now = get_scheduled_lisbon_time(now)
     target_date = parse_target_date(args.date) if args.date else now.date()
     force_run = args.force or env_bool("FORCE_RUN")
 
     log(
         "start "
         f"now_lisbon={now.isoformat()} "
+        f"scheduled_lisbon={scheduled_now.isoformat()} "
         f"target_date={target_date.isoformat()} "
         f"force_run={force_run} "
         f"dry_run={args.dry_run}"
     )
 
-    if not force_run and now.hour != 9:
-        log(f"Skipping: Lisbon local time is {now:%H:%M}, not 09:00.")
+    if not force_run and scheduled_now.hour != 9:
+        log(
+            "Skipping: scheduled Lisbon local time is "
+            f"{scheduled_now:%H:%M}, not 09:00."
+        )
         return 0
 
     intervals_api_key = os.getenv("INTERVALS_ICU_API_KEY", "")
@@ -135,6 +140,23 @@ def parse_target_date(value: str) -> date:
 
 def env_bool(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_scheduled_lisbon_time(now: datetime) -> datetime:
+    schedule = os.getenv("GITHUB_EVENT_SCHEDULE", "").strip()
+    match = re.fullmatch(r"(\d+)\s+(\d+)\s+\*\s+\*\s+\*", schedule)
+    if not match:
+        return now
+
+    minute = int(match.group(1))
+    hour = int(match.group(2))
+    scheduled_utc = datetime.combine(
+        now.astimezone(timezone.utc).date(),
+        datetime.min.time(),
+        tzinfo=timezone.utc,
+    ).replace(hour=hour, minute=minute)
+
+    return scheduled_utc.astimezone(LISBON_TZ)
 
 
 def summarize_http_error(status_code: int, body: str) -> str:

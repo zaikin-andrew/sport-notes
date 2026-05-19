@@ -37,6 +37,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-5.4-nano' }}
           FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
+          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule || '' }}
         run: python scripts/update_week_from_intervals.py
 
       - name: Commit weekly update

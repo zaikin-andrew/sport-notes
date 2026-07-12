@@ -44,7 +44,9 @@ Success means:
 - Consistency beats hero workouts.
 - Recovery drives adaptation.
 - Aerobic base is the foundation.
-- Strength and mobility are mandatory, not optional.
+- Strength and mobility are useful supporting modalities when they are feasible.
+- Do not repeatedly prescribe a modality the athlete has explicitly said is unavailable.
+- Current athlete constraints in `docs/` override generic supporting-modality preferences.
 - Concurrent training must be balanced.
 - Fatigue must be managed before it becomes injury or illness.
 - Nutrition supports adaptation, it is not punishment.

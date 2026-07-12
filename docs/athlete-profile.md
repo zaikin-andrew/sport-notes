@@ -55,10 +55,11 @@ Update this section after tests or races.
 
 ## Known Preferences
 
-- Monday is usually a full rest day
-- Saturday is suitable for long run
-- Sunday is suitable for long outdoor ride
+- Monday is a full rest day
+- Sunday cycling remains optional outside planned cycling blocks
 - Prefers structured but realistic plans
 - Does not want hidden fatigue accumulation
-- Wants a balance between running and cycling
-- Wants mobility and bodyweight strength included
+- Running is the primary focus through the half-marathon on 2026-09-13
+- Home workouts are not feasible and should not be prescribed
+- Gym training is not currently planned
+- From 2026-08-08 through 2026-08-23, both weekend days are reserved for 100+ km cycling with 800+ m elevation per day

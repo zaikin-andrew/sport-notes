@@ -9,9 +9,13 @@
 ## Training Constraints
 
 - Avoid hidden fatigue accumulation.
-- Balance running and cycling.
+- Running is the primary sport through the half-marathon on 2026-09-13.
+- Cycling is secondary except during the planned August cycling block.
 - Do not stack hard run, hard bike, long ride, long run, and leg strength without recovery.
-- Monday should normally remain a full rest day.
+- Monday is a full rest day.
+- Do not prescribe home workouts or gym sessions. They are not currently feasible.
+- From 2026-08-08 through 2026-08-23, both Saturday and Sunday include 100+ km cycling with 800+ m elevation per day.
+- During the August cycling block, schedule the long run midweek and do not schedule weekend running.
 
 ## Injury Risk Constraints
 

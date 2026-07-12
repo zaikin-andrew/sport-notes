@@ -56,6 +56,7 @@ Daily write behavior:
 
 - current-day sleep and recovery data goes into `State` for the current-day block
 - previous-day activities go into `Result` for the previous-day block
+- coaching decisions use the current contents of `docs/current-goals.md`, `docs/constraints.md`, and `docs/weekly-structure.md`
 - raw API responses are not stored
 - if OpenAI fails, the script writes a conservative fallback summary
 

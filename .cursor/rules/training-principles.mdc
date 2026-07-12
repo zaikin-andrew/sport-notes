@@ -1,12 +1,12 @@
 ---
-description: Training principles for running, cycling, mobility, and bodyweight strength
+description: Training principles for running, cycling, and feasible supporting modalities
 globs: "**/*.md"
 alwaysApply: true
 ---
 
 # Training Principles
 
-The athlete trains across running, cycling, mobility, and bodyweight strength.
+The athlete primarily trains through running and cycling. Supporting modalities are included only when they are feasible under current constraints.
 
 ## Global Training Logic
 
@@ -89,6 +89,8 @@ Mobility sessions should be short and repeatable.
 ## Strength And Bodyweight Training
 
 Strength supports durability, posture, power transfer, and injury prevention.
+
+Do not prescribe home workouts or gym sessions when current athlete constraints mark them as unavailable. Reintroduce strength only after the athlete explicitly changes that constraint.
 
 Prioritize:
 

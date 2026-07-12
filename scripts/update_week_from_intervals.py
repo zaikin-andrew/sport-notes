@@ -23,6 +23,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 INTERVALS_BASE_URL = "https://intervals.icu/api/v1"
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 HTTP_USER_AGENT = "sport-notes-intervals-sync/1.0"
+COACHING_CONTEXT_FILES = (
+    "docs/current-goals.md",
+    "docs/constraints.md",
+    "docs/weekly-structure.md",
+)
 RUSSIAN_MONTHS = {
     1: "января",
     2: "февраля",
@@ -334,8 +339,29 @@ def build_dry_run_context(target_date: date) -> dict[str, Any]:
     }
 
 
+def load_coaching_context() -> str:
+    sections = []
+
+    for relative_path in COACHING_CONTEXT_FILES:
+        path = REPO_ROOT / relative_path
+        try:
+            content = path.read_text(encoding="utf-8").strip()
+        except OSError as error:
+            log(f"coaching_context_read_failed path={relative_path} error={error}")
+            continue
+
+        if content:
+            sections.append(f"--- {relative_path} ---\n{content}")
+
+    if not sections:
+        return "Project coaching context is unavailable. Use conservative defaults."
+
+    return "\n\n".join(sections)
+
+
 def build_ai_summary(api_key: str, model: str, intervals_context: dict[str, Any]) -> dict[str, str]:
     compact_context = compact_intervals_context(intervals_context)
+    coaching_context = load_coaching_context()
     target_label = format_day_heading(parse_target_date(compact_context["target_date"]))
     activity_label = format_day_heading(parse_target_date(compact_context["activity_date"]))
     log(
@@ -344,6 +370,7 @@ def build_ai_summary(api_key: str, model: str, intervals_context: dict[str, Any]
         "temperature=0.2 response_format=json_object"
     )
     log_json("openai_prompt_context", compact_context)
+    log(f"coaching_context_files={json.dumps(list(COACHING_CONTEXT_FILES))}")
     body = {
         "model": model,
         "temperature": 0.2,
@@ -360,10 +387,12 @@ def build_ai_summary(api_key: str, model: str, intervals_context: dict[str, Any]
                     "decoupling/дрейф, рельеф и накопленную усталость. "
                     "Если ATL заметно выше CTL, form отрицательный, сон плохой/неизвестен или HRV низкий, "
                     "не рекомендуй интенсивность. После long ride, high load activity или высокой доли Z3+ "
-                    "на следующий день предпочитай Z1/Z2, mobility или отдых. "
-                    "Вывод должен помогать решить: keep / reduce duration / reduce intensity / Z1-Z2 only / mobility / full rest. "
+                    "на следующий день предпочитай Z1/Z2 или отдых. "
+                    "Вывод должен помогать решить: keep / reduce duration / reduce intensity / Z1-Z2 only / full rest. "
                     "Не выдумывай отсутствующие данные. "
-                    "Верни только JSON с ключами state и result."
+                    "Не назначай тренировки, которые запрещены или недоступны в актуальном контексте спортсмена. "
+                    "Верни только JSON с ключами state и result.\n\n"
+                    f"Актуальные цели и ограничения проекта:\n{coaching_context}"
                 ),
             },
             {
